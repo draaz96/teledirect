@@ -55,12 +55,28 @@ async def download_handler(request):
     )
 
     await response.prepare(request)
+    print(f"Starting download: {file_name} ({file_size / (1024*1024):.2f} MB)")
 
-    # Stream the file from Telegram with optimized request size
-    async for chunk in client.iter_download(message.media, request_size=512 * 1024):
-        await response.write(chunk)
+    try:
+        bytes_sent = 0
+        last_logged = 0
+        # Stream the file from Telegram with optimized request size
+        async for chunk in client.iter_download(message.media, request_size=256 * 1024):
+            await response.write(chunk)
+            bytes_sent += len(chunk)
+            
+            # Log progress every 5MB
+            if bytes_sent - last_logged > 5 * 1024 * 1024:
+                print(f"Streaming {file_name}: {bytes_sent / (1024*1024):.2f} MB sent...")
+                last_logged = bytes_sent
 
-    await response.write_eof()
+        await response.write_eof()
+        print(f"Download complete: {file_name}")
+    except (ConnectionResetError, ConnectionError, asyncio.CancelledError) as e:
+        print(f"Client disconnected during download of {file_name}: {e}")
+    except Exception as e:
+        print(f"Unexpected error during download: {e}")
+    
     return response
 
 @client.on(events.NewMessage)
