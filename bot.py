@@ -20,7 +20,7 @@ if not all([API_ID, API_HASH, BOT_TOKEN]):
     exit(1)
 
 # Initialize Telethon Client
-client = TelegramClient('bot_session', API_ID, API_HASH).start(bot_token=BOT_TOKEN)
+client = TelegramClient('bot_session', API_ID, API_HASH)
 
 # In-memory storage for file mappings (Task: Consider persistence for production)
 file_map = {}
@@ -104,9 +104,10 @@ async def start_server():
 
 async def main():
     await start_server()
+    print("Starting bot client...")
+    await client.start(bot_token=BOT_TOKEN)
     print("Bot is running...")
     await client.run_until_disconnected()
 
 if __name__ == '__main__':
-    loop = asyncio.get_event_loop()
-    loop.run_until_complete(main())
+    asyncio.run(main())
