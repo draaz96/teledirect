@@ -1,0 +1,13 @@
+.env
+*.session
+*.session-journal
+__pycache__/
+*.pyc
+.DS_Store
+node_modules/
+dist/
+.env.local
+.env.*.local
+.venv/
+env/
+venv/

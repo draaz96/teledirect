@@ -1,0 +1,112 @@
+import os
+import uuid
+import asyncio
+from aiohttp import web
+from telethon import TelegramClient, events
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv()
+
+API_ID = os.getenv("API_ID")
+API_HASH = os.getenv("API_HASH")
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+PORT = int(os.getenv("PORT", 8080))
+HOST = os.getenv("HOST", "0.0.0.0")
+BASE_URL = os.getenv("BASE_URL", f"http://localhost:{PORT}")
+
+if not all([API_ID, API_HASH, BOT_TOKEN]):
+    print("Error: API_ID, API_HASH, and BOT_TOKEN must be set in .env")
+    exit(1)
+
+# Initialize Telethon Client
+client = TelegramClient('bot_session', API_ID, API_HASH).start(bot_token=BOT_TOKEN)
+
+# In-memory storage for file mappings (Task: Consider persistence for production)
+file_map = {}
+
+async def health_check(request):
+    return web.Response(text="Bot is running and healthy!")
+
+async def download_handler(request):
+    file_id = request.match_info.get('uuid')
+    if file_id not in file_map:
+        return web.Response(text="File not found or expired", status=404)
+
+    msg_id = file_map[file_id]['msg_id']
+    chat_id = file_map[file_id]['chat_id']
+    file_name = file_map[file_id]['file_name']
+    file_size = file_map[file_id]['file_size']
+
+    # Get the message object
+    message = await client.get_messages(chat_id, ids=msg_id)
+    if not message or not message.file:
+        return web.Response(text="File no longer available", status=404)
+
+    # Prepare streaming response
+    response = web.StreamResponse(
+        status=200,
+        reason='OK',
+        headers={
+            'Content-Type': message.file.mime_type or 'application/octet-stream',
+            'Content-Disposition': f'attachment; filename="{file_name}"',
+            'Content-Length': str(file_size)
+        }
+    )
+
+    await response.prepare(request)
+
+    # Stream the file from Telegram with optimized request size
+    async for chunk in client.iter_download(message.media, request_size=512 * 1024):
+        await response.write(chunk)
+
+    await response.write_eof()
+    return response
+
+@client.on(events.NewMessage)
+async def handle_message(event):
+    if event.is_private and (event.document or event.video or event.audio):
+        file = event.document or event.video or event.audio
+        file_name = getattr(file.attributes[0], 'file_name', 'downloaded_file') if hasattr(file, 'attributes') and file.attributes else 'downloaded_file'
+        if not file_name or file_name == 'downloaded_file':
+             # fallback for videos or audios
+             for attr in file.attributes:
+                 if hasattr(attr, 'file_name'):
+                     file_name = attr.file_name
+                     break
+        
+        unique_id = str(uuid.uuid4())
+        file_map[unique_id] = {
+            'msg_id': event.id,
+            'chat_id': event.chat_id,
+            'file_name': file_name,
+            'file_size': file.size
+        }
+
+        # Build the link
+        download_link = f"{BASE_URL}/download/{unique_id}"
+        
+        await event.reply(
+            f"✅ **File Received!**\n\n"
+            f"🔗 **Download Link:**\n`{download_link}`\n\n"
+            f"💡 *Note: You can share this link with anyone!*"
+        )
+
+async def start_server():
+    app = web.Application()
+    app.router.add_get('/', health_check)
+    app.router.add_get('/download/{uuid}', download_handler)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, HOST, PORT)
+    await site.start()
+    print(f"Streaming server started at http://{HOST}:{PORT}")
+
+async def main():
+    await start_server()
+    print("Bot is running...")
+    await client.run_until_disconnected()
+
+if __name__ == '__main__':
+    loop = asyncio.get_event_loop()
+    loop.run_until_complete(main())
