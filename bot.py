@@ -28,6 +28,27 @@ file_map = {}
 async def health_check(request):
     return web.Response(text="Bot is running and healthy!")
 
+async def heartbeat():
+    """Background task to ping the bot's own health check to prevent Render timeout."""
+    import aiohttp
+    print("Heartbeat started...")
+    try:
+        async with aiohttp.ClientSession() as session:
+            while True:
+                try:
+                    async with session.get(f"{BASE_URL}/") as resp:
+                        if resp.status == 200:
+                            print("Heartbeat: Self-ping successful (Keeping Render awake)")
+                        else:
+                            print(f"Heartbeat: Self-ping failed with status {resp.status}")
+                except Exception as e:
+                    print(f"Heartbeat error: {e}")
+                
+                # Ping every 5 minutes (Render timeout is 15 mins)
+                await asyncio.sleep(5 * 60)
+    except asyncio.CancelledError:
+        print("Heartbeat stopped.")
+
 async def download_handler(request):
     file_id = request.match_info.get('uuid')
     if file_id not in file_map:
@@ -57,6 +78,9 @@ async def download_handler(request):
     await response.prepare(request)
     print(f"Starting download: {file_name} ({file_size / (1024*1024):.2f} MB)")
 
+    # Start the heartbeat to keep Render awake during this download
+    heartbeat_task = asyncio.create_task(heartbeat())
+
     try:
         bytes_sent = 0
         last_logged = 0
@@ -76,6 +100,9 @@ async def download_handler(request):
         print(f"Client disconnected during download of {file_name}: {e}")
     except Exception as e:
         print(f"Unexpected error during download: {e}")
+    finally:
+        # Stop the heartbeat once download finishes or fails
+        heartbeat_task.cancel()
     
     return response
 
