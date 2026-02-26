@@ -61,7 +61,7 @@ async def download_handler(request):
         bytes_sent = 0
         last_logged = 0
         # Stream the file from Telegram with optimized request size
-        async for chunk in client.iter_download(message.media, request_size=256 * 1024):
+        async for chunk in client.iter_download(message.media, request_size=1024 * 1024):
             await response.write(chunk)
             bytes_sent += len(chunk)
             
